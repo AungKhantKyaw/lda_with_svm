@@ -31,6 +31,7 @@ library(PRROC)
 # ----- LOAD DATASET -----
 # ===================================================
 df <- read.csv("dataset_full.csv")
+df <- df[sample(nrow(df), 40000), ]
 
 # ===================================================
 # ----- Separate Features and Target Variable -----
@@ -60,6 +61,11 @@ X_numeric_non_constant <- X_numeric[, non_constant_cols, drop = FALSE]
 
 # Scale the non-constant numeric columns
 X_scaled <- as.data.frame(scale(X_numeric_non_constant))
+
+n_features <- ncol(X_scaled)
+cat("Number of features:", n_features, "\n")
+print(colnames(X_scaled))
+
 
 # ===================================================
 # ----- SPLIT DATA INTO TRAIN (70%) / TEST (30%) -----
@@ -574,7 +580,7 @@ for (i in 1:num_batches) {
   
   # Train SVM
   start_time_batch <- Sys.time()
-  svm_model_top95_batch <- svm(X_train_selected_batch, as.factor(y_train_batch), kernel = "radial", probability = TRUE)
+  svm_model_top95_batch <- svm(X_train_selected_batch, as.factor(y_train_batch), kernel = "linear", probability = TRUE)
   end_time_batch <- Sys.time()
   training_time_top95_batch <- as.numeric(difftime(end_time_batch, start_time_batch, units = "secs"))
   
@@ -634,7 +640,7 @@ cat("\nTraining Final SVM Model on All Training Data with Top 95 LDA-Weighted Fe
 X_train_final_selected <- X_weighted_data[, top_features]
 y_train_final <- y_weighted_data
 
-svm_model_top95_final <- svm(X_train_final_selected, as.factor(y_train_final), kernel = "radial", probability = TRUE)
+svm_model_top95_final <- svm(X_train_final_selected, as.factor(y_train_final), kernel = "linear", probability = TRUE)
 
 
 # Get the absolute values of LDA loadings
@@ -696,7 +702,7 @@ compute_metrics_qr <- function(y_true, y_pred, y_scores) {
   ))
 }
 
-incremental_learning_pipeline_qr_eval_batch <- function(X_train, y_train, gamma_manual, cost_manual) {
+incremental_learning_pipeline_qr_eval_batch <- function(X_train, y_train,cost_manual) {
   num_samples <- nrow(X_train)
   num_trunks <- 10
   trunk_size <- floor(0.7 * num_samples / num_trunks)
@@ -725,8 +731,8 @@ incremental_learning_pipeline_qr_eval_batch <- function(X_train, y_train, gamma_
       # Remove constant columns
       X_transformed <- X_transformed[, apply(X_transformed, 2, function(col) length(unique(col)) > 1), drop = FALSE]
       
-      svm_model <- e1071::svm(X_transformed, as.factor(y_new), kernel = "radial",
-                              gamma = gamma_manual, cost = cost_manual,
+      svm_model <- e1071::svm(X_transformed, as.factor(y_new), kernel = "linear",
+                              cost = cost_manual,
                               probability = TRUE, class.weights = c('0' = 1, '1' = 1))
       next
     }
@@ -752,8 +758,8 @@ incremental_learning_pipeline_qr_eval_batch <- function(X_train, y_train, gamma_
     # Remove constant columns
     X_transformed <- X_transformed[, apply(X_transformed, 2, function(col) length(unique(col)) > 1), drop = FALSE]
     
-    svm_model <- e1071::svm(X_transformed, as.factor(y_new), kernel = "radial",
-                            gamma = gamma_manual, cost = cost_manual,
+    svm_model <- e1071::svm(X_transformed, as.factor(y_new), kernel = "linear",
+                            cost = cost_manual,
                             probability = TRUE, class.weights = c('0' = 1, '1' = 1))
     
     pred <- predict(svm_model, X_transformed)
@@ -795,14 +801,14 @@ y_train_final_qr <- y_train_final
 batch_results_qr <- incremental_learning_pipeline_qr_eval_batch(
   as.matrix(X_train_weighted_qr),
   as.factor(y_train_final_qr),
-  gamma_manual = 0.025,
   cost_manual = 5
 )
 
+#  gamma_manual = 0.025,
 print(batch_results_qr$results)
 
 # Save to CSV
-write.csv(batch_results_qr$results, "results_qr.csv", row.names = FALSE)
+write.csv(batch_results_qr$results, "results_qr_May_25.csv", row.names = FALSE)
 
 # ----- Plotting -----
 if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
@@ -908,11 +914,10 @@ update_qr_stats <- function(stats, X_batch, n_components_qr) {
 }
 
 # ========== Helper: Train SVM ==========
-train_svm_model <- function(X, y, gamma, cost) {
+train_svm_model <- function(X, y, cost) {
   e1071::svm(
     X, as.factor(y),
-    kernel = "radial",
-    gamma = gamma,
+    kernel = "linear",
     cost = cost,
     probability = TRUE,
     class.weights = c('0' = 1, '1' = 1)
@@ -1028,7 +1033,7 @@ incremental_qr_on_test <- function(X_test_full, y_test_full,
     X_train_transformed <- X_train_new %*% projection_matrix
     
     # Retrain SVM
-    svm_model <- train_svm_model(X_train_transformed, y_train_new, gamma_manual, cost_manual)
+    svm_model <- train_svm_model(X_train_transformed, y_train_new, cost_manual)
     
     # Evaluate on fixed eval set (projected)
     metrics_row <- evaluate_model_qr(svm_model, X_eval, y_eval, projection_matrix)
@@ -1089,7 +1094,6 @@ incremental_results_test_qr <- incremental_qr_on_test(
   initial_model = final_model_qr,
   initial_proj = final_projection_qr,
   initial_stats = batch_results_qr$final_stats,
-  gamma_manual = best_gamma,
   cost_manual = best_cost
 )
 
@@ -1097,7 +1101,7 @@ incremental_results_test_qr <- incremental_qr_on_test(
 print(incremental_results_test_qr$results)
 
 # Save to CSV
-write.csv(incremental_results_test_qr$results, "results_qr_test.csv", row.names = FALSE)
+write.csv(incremental_results_test_qr$results, "results_qr_test_May_25.csv", row.names = FALSE)
 
 # ----- Plotting -----
 if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
@@ -1194,7 +1198,7 @@ for (i in seq_along(batches)) {
   
   # Train model with current training set
   svm_model_top95_final <- svm(X_current_train, as.factor(y_current_train),
-                               kernel = "radial", gamma = 0.025, cost = 5,
+                               kernel = "linear", cost = 5,
                                probability = TRUE, class.weights = c('0' = 1, '1' = 1))
   
   # Predict with timing
@@ -1242,7 +1246,7 @@ print(test_results_top95)
 summary(test_results_top95)
 
 # Save results
-write.csv(test_results_top95, file = "results_test_top_95.csv", row.names = FALSE)
+write.csv(test_results_top95, file = "results_test_top_95_May_25.csv", row.names = FALSE)
 
 # === Plotting ===
 if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
@@ -1253,7 +1257,7 @@ if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
     geom_tile() +
     scale_fill_gradient(low = "white", high = "steelblue") +
     geom_text(aes(label = Freq), vjust = 0.5) +
-    labs(title = "Confusion Matrix on Test Data (Top 21 Features)", fill = "Frequency") +
+    labs(title = "Confusion Matrix on Test Data (Top 95 Features)", fill = "Frequency") +
     theme_minimal()
   print(plt_cm)
   
@@ -1264,7 +1268,7 @@ if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
                      aes(x = Recall, y = Precision)) +
       geom_line() +
       geom_hline(yintercept = mean(all_true_labels_test), linetype = "dashed", color = "red") + # Baseline
-      labs(title = "Precision-Recall Curve on Test Data (Top 21 Features)",
+      labs(title = "Precision-Recall Curve on Test Data (Top 95 Features)",
            x = "Recall", y = "Precision",
            caption = paste("AUC-PR =", round(pr_data$auc.integral, 3))) +
       theme_minimal()
@@ -1295,3 +1299,101 @@ if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
 } else {
   cat("Please install 'ggplot2', 'caret', and 'pROC' packages to plot.\n")
 }
+
+qr_website_results <- data.frame(
+  Trunk = 0:9,
+  Accuracy = c(1.000000, 0.9666666, 0.9666666, 0.9666666, 0.9666666,
+               0.9777777, 0.9555555, 0.9666666, 0.9666666, 0.9888888),
+  Precision = c(1.000000, 0.9444444, 0.9615384, 0.9444444, 0.9615384,
+                0.9622641, 0.9272727, 0.9615384, 0.9615384, 0.9807692),
+  Recall = c(1.000000, 1.000000, 0.9803921, 1.000000, 0.9803921,
+             1.000000, 1.000000, 0.9803921, 0.9803921, 1.000000),
+  F1_Score = c(1.000000, 0.9714285, 0.9708737, 0.9714285, 0.9708737,
+               0.9807692, 0.9622641, 0.9708737, 0.9708737, 0.9902912),
+  AUC = c(1.000000, 0.9994972, 0.9899446, 0.9924585, 0.9899446,
+          1.000000, 0.9959778, 0.9909502, 0.9964806, 0.9949723),
+  TP = c(261, 1020, 1020, 1040, 995, 1033, 1009, 1029, 995, 1065),
+  TN = c(523, 1974, 1954, 1948, 1998, 1937, 1973, 1960, 1990, 1912),
+  FP = c(9, 32, 36, 32, 30, 47, 36, 29, 37, 38),
+  FN = c(4, 14, 30, 20, 17, 23, 22, 22, 18, 25),
+  QR_Update_Time = c(0.0206720, 0.0203199, 0.0210847, 0.0211539, 0.0209078,
+                     0.0206720, 0.0205321, 0.0214328, 0.0346379, 0.0204999),
+  CPU_Usage_Time = c(0.0220000, 0.0210000, 0.0200000, 0.0209999, 0.0210000,
+                     0.0210000, 0.0210000, 0.0220000, 0.0239999, 0.0210000)
+)
+
+# Example: Take confusion matrix from one batch (e.g., last batch)
+last_batch <- tail(qr_website_results, 1)
+
+# Create matrix with actual labels (Reference) on rows and predictions on columns
+cm_matrix <- matrix(c(
+  last_batch$TN, last_batch$FP,
+  last_batch$FN, last_batch$TP
+), nrow = 2, byrow = TRUE)
+
+rownames(cm_matrix) <- c("0", "1")  # Actual
+colnames(cm_matrix) <- c("0", "1")  # Predicted
+
+# Melt to long format
+cm_df <- melt(cm_matrix)
+colnames(cm_df) <- c("Reference", "Prediction", "Frequency")
+
+# Plot confusion matrix heatmap
+ggplot(cm_df, aes(x = Prediction, y = Reference, fill = Frequency)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Frequency), size = 6) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Confusion Matrix on Test Data (QR)",
+       x = "Prediction",
+       y = "Reference") +
+  theme_minimal(base_size = 14)
+
+
+lda_website_results <- data.frame(
+  Batch = 1:10,
+  Accuracy = c(0.9266666, 0.9433333, 0.9166666, 0.9374443, 0.9133333,
+               0.9374443, 0.9233333, 0.9433333, 0.9466666, 0.9535381),
+  Precision = c(0.9798497, 0.9860539, 0.9687803, 0.9801435, 0.9780008,
+                0.9749949, 0.9769921, 0.9754070, 0.9874217, 0.9833007),
+  Recall = c(0.8989899, 0.9245283, 0.8648648, 0.8938050, 0.8487394,
+             0.8666666, 0.8839285, 0.9035087, 0.8867924, 0.9047619),
+  F1_Score = c(0.8811881, 0.9158878, 0.9056603, 0.9181818, 0.9266055,
+               0.9285714, 0.9082568, 0.9449541, 0.9591836, 0.9557142),
+  AUC = c(0.8993427, 0.9201877, 0.8847926, 0.9058295, 0.8859649,
+          0.8965517, 0.8959276, 0.9237668, 0.9215686, 0.9268292),
+  TP = c(846, 821, 891, 843, 881, 849, 863, 845, 867, 888),
+  TN = c(1686, 1718, 1640, 1707, 1669, 1704, 1693, 1686, 1697, 1668),
+  FP = c(66, 60, 63, 59, 56, 46, 51, 59, 46, 47),
+  FN = c(62, 60, 66, 50, 54, 60, 52, 70, 49, 57),
+  LDA_Update_Time = c(3.2255649, 3.4548990, 3.6193871, 3.9066469, 4.0041968,
+                      4.2087299, 4.1785099, 4.2981359, 4.4533910, 4.8610570),
+  CPU_Usage_Time = c(3.0210000, 3.2579999, 3.4010000, 3.6980000, 3.7860000,
+                     3.9920000, 3.9400000, 4.0919999, 4.2349999, 4.5770000)
+)
+
+# Example: Take confusion matrix from one batch (e.g., last batch)
+l_last_batch <- tail(lda_website_results, 1)
+
+# Create matrix with actual labels (Reference) on rows and predictions on columns
+cm_matrix <- matrix(c(
+  l_last_batch$TN, l_last_batch$FP,
+  l_last_batch$FN, l_last_batch$TP
+), nrow = 2, byrow = TRUE)
+
+rownames(cm_matrix) <- c("0", "1")  # Actual
+colnames(cm_matrix) <- c("0", "1")  # Predicted
+
+# Melt to long format
+cm_df <- melt(cm_matrix)
+colnames(cm_df) <- c("Reference", "Prediction", "Frequency")
+
+# Plot confusion matrix heatmap
+ggplot(cm_df, aes(x = Prediction, y = Reference, fill = Frequency)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Frequency), size = 6) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Confusion Matrix on Test Data (Top 95 Features)",
+       x = "Prediction",
+       y = "Reference") +
+  theme_minimal(base_size = 14)
+

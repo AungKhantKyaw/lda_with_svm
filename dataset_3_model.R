@@ -38,6 +38,9 @@ library(PRROC)
 df <- read.csv("CEAS_08.csv", stringsAsFactors = FALSE)
 #df <- df[sample(nrow(df), 5000), ]
 
+n_features <- ncol(df)
+cat("Number of features:", n_features, "\n")
+print(colnames(df))
 # ============================
 #     SEPARATE FEATURES / TARGET
 # ============================
@@ -64,6 +67,10 @@ dtm <- DocumentTermMatrix(corpus, control = list(weighting = weightTfIdf))
 dtm <- removeSparseTerms(dtm, 0.94)
 
 X <- as.data.frame(as.matrix(dtm))
+
+n_features <- ncol(X)
+cat("Number of features:", n_features, "\n")
+print(colnames(X))
 
 # ======================
 #     SPLIT DATA (70/30)
@@ -103,8 +110,23 @@ X_train_final <- balanced_data[, !colnames(balanced_data) %in% "label"]
 y_train_final <- balanced_data$label
 
 
+########### TUNE ##########################
+
+tuned_linear <- tune.svm(
+  x = X_train_final,
+  y = as.factor(y_train_final),
+  kernel = "linear",
+  cost = 2^(-5:5)  # Try a range of cost values
+)
+
+# View best model and results
+summary(tuned_linear)
+best_model <- tuned_linear$best.model
+best_cost <- best_model$cost
+cat("Best Cost:", best_cost, "\n")
+
 best_gamma = 0.125
-best_cost = 16
+best_cost = 8
 
 # ======================================
 #     SVM Cross-Validation WITHOUT LDA
@@ -724,8 +746,7 @@ for (i in seq_along(indices)) {
   cpu_start <- proc.time()
   start_time <- Sys.time()
   
-  svm_model_top70 <- svm(X_train_selected, as.factor(y_train), kernel = "radial",
-                         gamma = best_gamma,
+  svm_model_top70 <- svm(X_train_selected, as.factor(y_train), kernel = "linear",
                          cost = best_cost,
                          probability = TRUE)
   
@@ -777,8 +798,7 @@ cat("\nTraining Final SVM Model on All Training Data with Top 70 LDA-Weighted Fe
 X_train_final_selected <- X_weighted_data[, top_features]
 y_train_final <- y_weighted_data
 
-svm_model_top70_final <- svm(X_train_final_selected, as.factor(y_train_final), kernel = "radial",
-                             gamma = best_gamma,
+svm_model_top70_final <- svm(X_train_final_selected, as.factor(y_train_final), kernel = "linear",
                              cost = best_cost, probability = TRUE)
 
 
@@ -840,14 +860,14 @@ compute_metrics_qr <- function(y_true, y_pred, y_scores) {
   ))
 }
 
-update_svm_qr <- function(model_qr, X_transformed_qr, y_batch_qr, X_all_qr = NULL, y_all_qr = NULL, gamma_manual_qr, cost_manual_qr) {
+update_svm_qr <- function(model_qr, X_transformed_qr, y_batch_qr, X_all_qr = NULL, y_all_qr = NULL, cost_manual_qr) {
   if (is.null(model_qr)) {
     return(e1071::svm(X_transformed_qr, as.factor(y_batch_qr),
-                      kernel = "radial", gamma = gamma_manual_qr, cost = cost_manual_qr,
+                      kernel = "linear", cost = cost_manual_qr,
                       probability = TRUE, class.weights = c('0' = 1, '1' = 1)))
   } else {
     return(e1071::svm(X_all_qr, as.factor(y_all_qr),
-                      kernel = "radial", gamma = gamma_manual_qr, cost = cost_manual_qr,
+                      kernel = "linear",cost = cost_manual_qr,
                       probability = TRUE, class.weights = c('0' = 1, '1' = 1)))
   }
 }
@@ -859,7 +879,7 @@ get_class_weights <- function(y) {
   return(as.list(weights))
 }
 
-incremental_learning_pipeline_qr <- function(X_train, y_train, gamma_manual, cost_manual) {
+incremental_learning_pipeline_qr <- function(X_train, y_train,cost_manual) {
   num_samples <- nrow(X_train)
   num_trunks <- 10
   trunk_size <- floor(num_samples / num_trunks)
@@ -882,7 +902,7 @@ incremental_learning_pipeline_qr <- function(X_train, y_train, gamma_manual, cos
   
   class_weights <- get_class_weights(y_trunk1)
   svm_model <- e1071::svm(X_transformed_trunk1, as.factor(y_trunk1),
-                          kernel = "radial", gamma = gamma_manual, cost = cost_manual,
+                          kernel = "linear", cost = cost_manual,
                           probability = TRUE, class.weights = class_weights)
   
   all_transformed_X <- X_transformed_trunk1
@@ -921,7 +941,7 @@ incremental_learning_pipeline_qr <- function(X_train, y_train, gamma_manual, cos
     
     class_weights <- get_class_weights(all_y)
     svm_model <- e1071::svm(all_transformed_X, as.factor(all_y),
-                            kernel = "radial", gamma = gamma_manual, cost = cost_manual,
+                            kernel = "linear", cost = cost_manual,
                             probability = TRUE, class.weights = class_weights)
     
     pred_eval <- predict(svm_model, X_transformed_trunk1)
@@ -956,7 +976,6 @@ y_train_final_qr_factor <- as.factor(y_train_final_qr)
 batch_results_qr <- incremental_learning_pipeline_qr(
   as.matrix(X_train_weighted_qr),
   y_train_final_qr_factor,
-  gamma_manual = best_gamma,
   cost_manual = best_cost
 )
 
@@ -1079,8 +1098,9 @@ ggplot(batch_results_qr$results, aes(x = Cumulative_Size, y = Accuracy_qr)) +
 final_model_qr <- batch_results_qr$final_model
 final_projection_qr <- batch_results_qr$final_projection
 
-best_gamma_test = 0.125
-best_cost_test = 16
+#best_gamma_test = 0.125
+#best_cost_test = 16
+best_cost_test = 8
 
 # ========== Helper: Compute Class Weights ==========
 get_class_weights <- function(y) {
@@ -1120,8 +1140,7 @@ train_svm_model <- function(X, y, gamma, cost) {
   
   e1071::svm(
     X, as.factor(y),
-    kernel = "radial",
-    gamma = gamma,
+    kernel = "linear",
     cost = cost,
     probability = TRUE,
     class.weights = class_weights
@@ -1268,7 +1287,7 @@ print(incremental_results_test_qr)
 
 
 # ========== Save to CSV ==========
-write.csv(incremental_results_test_qr, "incremental_qr_test_results.csv", row.names = FALSE)
+write.csv(incremental_results_test_qr, "incremental_qr_test_results_may_24.csv", row.names = FALSE)
 
 
 # === Plotting Performance Metrics vs. Batch on Test Data ===
@@ -1371,7 +1390,7 @@ test_results_top70 <- data.frame(
 # === Storage for Overall Predictions and Labels ===
 all_probabilities_top70 <- numeric()
 all_true_labels_top70 <- numeric()
-all_predictions_top70 <- factor(levels = levels(y_test))
+all_predictions_top70 <- factor(character(0), levels = levels(y_test))  # Fixed initialization
 
 # === Start with Initial Training Data ===
 X_current_train <- X_train_final_selected
@@ -1382,14 +1401,18 @@ for (i in seq_along(batches)) {
   cat("Processing Test Batch", i, "\n")
   
   idx <- batches[[i]]
-  X_batch <- X_test_selected[idx, ]
+  X_batch <- X_test_selected[idx, , drop = FALSE]
   y_batch <- y_test[idx]
+  
+  if (length(unique(y_batch)) < 2) {
+    warning(paste("Skipping batch", i, "- only one class present"))
+    next
+  }
   
   # --- Train SVM ---
   cpu_start_train <- proc.time()
   svm_model_top70_final <- svm(X_current_train, y_current_train,
-                               kernel = "radial",
-                               gamma = best_gamma,
+                               kernel = "linear",
                                cost = best_cost,
                                probability = TRUE)
   cpu_end_train <- proc.time()
@@ -1408,7 +1431,7 @@ for (i in seq_along(batches)) {
   inference_cpu_time <- (cpu_end_infer - cpu_start_infer)[["user.self"]] +
     (cpu_end_infer - cpu_start_infer)[["sys.self"]]
   
-  preds <- factor(preds, levels = levels(y_test))  # Ensure consistency
+  preds <- factor(preds, levels = levels(y_test))
   
   # --- Confusion Matrix & Metrics ---
   cm <- table(Predicted = preds, Actual = y_batch)
@@ -1442,24 +1465,28 @@ for (i in seq_along(batches)) {
   
   test_results_top70 <- rbind(test_results_top70, new_row)
   
-  # --- Store Predictions for Overall Analysis ---
   all_probabilities_top70 <- c(all_probabilities_top70, preds_proba)
   all_true_labels_top70 <- c(all_true_labels_top70, as.numeric(as.character(y_batch)))
-  all_predictions_top70 <- factor(c(as.character(all_predictions_top70), as.character(preds)), 
-                                  levels = levels(y_test))
+  all_predictions_top70 <- factor(
+    c(as.character(all_predictions_top70), as.character(preds)), 
+    levels = levels(y_test)
+  )
   
-  # --- Add Batch to Training Set for Next Iteration ---
+  # --- Expand Training Set ---
   X_current_train <- rbind(X_current_train, X_batch)
-  y_current_train <- factor(c(as.character(y_current_train), as.character(y_batch)), 
-                            levels = levels(y_test))
+  y_current_train <- factor(
+    c(as.character(y_current_train), as.character(y_batch)), 
+    levels = levels(y_test)
+  )
+  
+  # Optional: Sanity check
+  stopifnot(nrow(X_current_train) == length(y_current_train))
 }
 
-# === View Results ===
+# === Final Evaluation Summary ===
 print(test_results_top70)
-summary(test_results_top70)
-
 # === Save to CSV ===
-write.csv(test_results_top70, file = "results_test_top_70_may_9_3.csv", row.names = FALSE)
+write.csv(test_results_top70, file = "results_test_top_70_may_24.csv", row.names = FALSE)
 
 
 # === Prepare Test Data with Top 70 Features ===
@@ -1512,8 +1539,7 @@ for (i in seq_along(batches)) {
   # --- Train SVM ---
   cpu_start_train <- proc.time()
   svm_model_top70_final <- svm(X_current_train, y_current_train,
-                               kernel = "radial",
-                               gamma = best_gamma,
+                               kernel = "linear",
                                cost = best_cost,
                                probability = TRUE)
   cpu_end_train <- proc.time()

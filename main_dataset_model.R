@@ -4,6 +4,7 @@ packages <- c("caret", "ggplot2", "e1071", "pROC", "MASS", "bigstatsr",
 
 install.packages("corrplot")
 install.packages("pheatmap")
+install.packages("pracma")
 
 installed <- rownames(installed.packages())
 for (pkg in packages) {
@@ -116,38 +117,23 @@ cat("Final Train set size (70% of 70%):", nrow(X_train_final), "\n")
 cat("Validation set size (30% of 70%):", nrow(X_valid), "\n")
 
 
-# --- Perform SVM parameter tuning ---
-tune_result <- tune(svm,
-                    train.x = X_train_final,
-                    train.y = as.factor(y_train_final),
-                    kernel = "radial",
-                    ranges = list(
-                      cost = 2^(-5:5),
-                      gamma = 2^(-5:5)
-                    ),
-                    tunecontrol = tune.control(sampling = "cross", cross = 5)
-)
 
-# --- Best model and parameters ---
-best_model <- tune_result$best.model
-print(best_model)
-
-# --- Show the full result table ---
-results <- tune_result$performances
-results$Accuracy <- 1 - results$error   # Compute Accuracy manually
-print(results)
-
-# --- Show the best Accuracy ---
-best_accuracy <- max(results$Accuracy)
-cat("\nBest Cross-Validated Accuracy:", round(best_accuracy * 100, 2), "%\n")
-
-# --- Plotting tuning results ---
-plot(tune_result)
-
-best_model <- tune_result$best.model
-summary(best_model)
 
 ########### TUNE ##########################
+
+tuned_linear <- tune.svm(
+  x = X_train_final,
+  y = as.factor(y_train_final),
+  kernel = "linear",
+  cost = 2^(-5:5)  # Try a range of cost values
+)
+
+# View best model and results
+summary(tuned_linear)
+best_model <- tuned_linear$best.model
+best_cost <- best_model$cost
+cat("Best Cost:", best_cost, "\n")
+
 # tuned <- tune.svm(x = X_train_final, y = as.factor(y_train_final),
 #                   kernel = "radial",
 #                   gamma = 2^(-5:2), cost = 2^(-1:4))
@@ -162,8 +148,10 @@ summary(best_model)
 # best_gamma = 0.015625 #old
 # best_cost  = 16 #old
 
-best_gamma = 0.03125
-best_cost = 0.0625
+#best_gamma = 0.03125
+#best_cost = 0.0625
+
+best_cost = 0.25 #NEW
 
 # ===================================================
 # ----- SVM WITHOUT LDA - WHOLE FEATURE -----
@@ -249,8 +237,7 @@ for (i in seq_along(folds)) {
   start_time <- Sys.time()
   svm_model_lda <- svm(X_train_lda,
                        as.factor(y_train_fold),
-                       kernel = "radial",
-                       gamma = best_gamma,
+                       kernel = "linear",
                        cost = best_cost,
                        probability = TRUE)
   end_time <- Sys.time()
@@ -362,7 +349,7 @@ for (i in seq_along(folds)) {
   cpu_start <- proc.time()
   start_time <- Sys.time()
   
-  svm_model <- svm(X_train_selected, as.factor(y_train_fold), kernel = "radial", probability = TRUE)
+  svm_model <- svm(X_train_selected, as.factor(y_train_fold), kernel = "linear", cost = best_cost, probability = TRUE)
   
   end_time <- Sys.time()
   cpu_end <- proc.time()
@@ -401,7 +388,7 @@ print(results_21cols)
 summary(results_21cols)
 
 # Save the results
-write.csv(results_21cols, file = "results_21_random_features_may_8.csv", row.names = FALSE)
+write.csv(results_21cols, file = "results_21_random_features_may_22.csv", row.names = FALSE)
 
 
 # ===================================================
@@ -989,7 +976,7 @@ incremental_learning_pipeline_pca_eval_batch1 <- function(X_train, y_train, batc
 }
 
 # ========================
-# Run the OB-INC pipeline
+# Run the PCA-INC pipeline
 # ========================
 set.seed(42)
 
@@ -1114,19 +1101,19 @@ compute_metrics_qr <- function(y_true, y_pred, y_scores) {
   ))
 }
 
-update_svm_qr <- function(model_qr, X_transformed_qr, y_batch_qr, X_all_qr = NULL, y_all_qr = NULL, gamma_manual_qr, cost_manual_qr) {
+update_svm_qr <- function(model_qr, X_transformed_qr, y_batch_qr, X_all_qr = NULL, y_all_qr = NULL, cost_manual_qr) {
   if (is.null(model_qr)) {
     return(e1071::svm(X_transformed_qr, as.factor(y_batch_qr),
-                      kernel = "radial", gamma = gamma_manual_qr, cost = cost_manual_qr,
+                      kernel = "linear", cost = cost_manual_qr,
                       probability = TRUE, class.weights = c('0' = 1, '1' = 1)))
   } else {
     return(e1071::svm(X_all_qr, as.factor(y_all_qr),
-                      kernel = "radial", gamma = gamma_manual_qr, cost = cost_manual_qr,
+                      kernel = "linear", cost = cost_manual_qr,
                       probability = TRUE, class.weights = c('0' = 1, '1' = 1)))
   }
 }
 
-incremental_learning_pipeline_qr_eval_batch1 <- function(X_train, y_train, batch_size, gamma_manual, cost_manual) {
+incremental_learning_pipeline_qr_eval_batch1 <- function(X_train, y_train, batch_size, cost_manual) {
   num_samples <- nrow(X_train)
   num_batches <- ceiling(num_samples / batch_size)
   
@@ -1168,8 +1155,8 @@ incremental_learning_pipeline_qr_eval_batch1 <- function(X_train, y_train, batch
   projection_matrix <- qr.Q(qr_result)[, 1:min(ncol(X_batch1), stats$n - 1), drop = FALSE]
   X_transformed_batch1 <- X_batch1 %*% projection_matrix
   
-  svm_model <- e1071::svm(X_transformed_batch1, as.factor(y_batch1), kernel = "radial",
-                          gamma = gamma_manual, cost = cost_manual,
+  svm_model <- e1071::svm(X_transformed_batch1, as.factor(y_batch1), kernel = "linear",
+                          cost = cost_manual,
                           probability = TRUE, class.weights = c('0' = 1, '1' = 1))
   
   # === Loop Through Remaining Batches for Incremental Updates ===
@@ -1205,8 +1192,8 @@ incremental_learning_pipeline_qr_eval_batch1 <- function(X_train, y_train, batch
     X_train_update <- rbind(X_transformed_batch1, X_transformed)
     y_train_update <- c(y_batch1, y_batch)
     
-    svm_model <- e1071::svm(X_train_update, as.factor(y_train_update), kernel = "radial",
-                            gamma = gamma_manual, cost = cost_manual,
+    svm_model <- e1071::svm(X_train_update, as.factor(y_train_update), kernel = "linear",
+                            cost = cost_manual,
                             probability = TRUE, class.weights = c('0' = 1, '1' = 1))
     
     end_svm_time <- Sys.time()
@@ -1259,12 +1246,11 @@ batch_results_qr <- incremental_learning_pipeline_qr_eval_batch1(
   as.matrix(X_train_weighted_qr),
   as.factor(y_train_final_qr),
   batch_size = batch_size_qr,
-  gamma_manual = best_gamma,
   cost_manual = best_cost
 )
 
 print(batch_results_qr$results)
-write.csv(batch_results_qr$results, file = "results_qr_may_8.csv", row.names = FALSE)
+write.csv(batch_results_qr$results, file = "results_qr_may_24.csv", row.names = FALSE)
 
 # ----- Plotting -----
 if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
@@ -1348,11 +1334,10 @@ update_qr_stats <- function(stats, X_batch, n_components_qr) {
 }
 
 # ========== Helper: Train SVM ==========
-train_svm_model <- function(X, y, gamma, cost) {
+train_svm_model <- function(X, y,cost) {
   e1071::svm(
     X, as.factor(y),
-    kernel = "radial",
-    gamma = gamma,
+    kernel = "linear",
     cost = cost,
     probability = TRUE,
     class.weights = c('0' = 1, '1' = 1)
@@ -1370,7 +1355,7 @@ evaluate_model_qr <- function(model, X_eval, y_eval, projection_matrix) {
 # ========== Main Function: Incremental QR on Test ==========
 incremental_qr_on_test <- function(X_test_full, y_test_full,
                                    initial_model, initial_proj, initial_stats,
-                                   gamma_manual, cost_manual,
+                                   cost_manual,
                                    verbose = TRUE) {
   
   # Define batches
@@ -1422,7 +1407,7 @@ incremental_qr_on_test <- function(X_test_full, y_test_full,
     X_train_transformed <- X_train_new %*% projection_matrix
     
     # Retrain SVM
-    svm_model <- train_svm_model(X_train_transformed, y_train_new, gamma_manual, cost_manual)
+    svm_model <- train_svm_model(X_train_transformed, y_train_new,cost_manual)
     
     # Evaluate on fixed eval set
     eval_results <- evaluate_model_qr(svm_model, X_eval, y_eval, projection_matrix)
@@ -1477,7 +1462,6 @@ incremental_results_test_qr_output <- incremental_qr_on_test(
   initial_model = final_model_qr,
   initial_proj = final_projection_qr,
   initial_stats = batch_results_qr$final_stats,
-  gamma_manual = best_gamma,
   cost_manual = best_cost
 )
 
@@ -1485,7 +1469,7 @@ print(incremental_results_test_qr_output$results)
 final_eval_results <- incremental_results_test_qr_output$final_evaluation$metrics
 print("Final Evaluation Metrics on Fixed Set:")
 print(final_eval_results)
-write.csv(incremental_results_test_qr_output$results, file = "results_test_qr_may_8.csv", row.names = FALSE)
+write.csv(incremental_results_test_qr_output$results, file = "results_test_qr_may_24.csv", row.names = FALSE)
 
 # ----- Plotting -----
 if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
@@ -1578,8 +1562,7 @@ for (i in seq_along(batches)) {
   # Retrain SVM with updated training set
   cpu_start_train <- proc.time()
   svm_model_top21_final <- svm(X_current_train, y_current_train,
-                               kernel = "radial",
-                               gamma = best_gamma,
+                               kernel = "linear",
                                cost = best_cost,
                                probability = TRUE)
   cpu_end_train <- proc.time()
@@ -1667,7 +1650,7 @@ for (i in seq_along(batches)) {
 print(test_results_top21)
 summary(test_results_top21)
 
-write.csv(test_results_top21, file = "results_test_top_21_may_8.csv", row.names = FALSE)
+write.csv(test_results_top21, file = "results_test_top_21_may_24.csv", row.names = FALSE)
 
 # === Plotting ===
 if (require(ggplot2) && require(caret) && require(pROC)) {
@@ -1713,3 +1696,491 @@ if (require(ggplot2) && require(caret) && require(pROC)) {
 } else {
   cat("Please install 'ggplot2', 'caret', and 'pROC' packages to plot.\n")
 }
+
+
+### MAIN QR FUNCTION ####
+
+# --- QR-based incremental LDA projection ---
+incremental_qr_lda <- function(prev_cov, prev_mean, prev_n, X_new, n_components) {
+  new_n <- prev_n + nrow(X_new)
+  new_mean <- (prev_mean * prev_n + colSums(X_new)) / new_n
+  X_centered <- scale(X_new, center = new_mean, scale = FALSE)
+  
+  cov_update <- (prev_cov * (prev_n - 1) + crossprod(X_centered)) / (new_n - 1)
+  qr_result <- qr(cov_update)
+  projection_matrix <- qr.Q(qr_result)[, 1:n_components, drop = FALSE]
+  
+  return(list(
+    projection = projection_matrix,
+    updated_cov = cov_update,
+    updated_mean = new_mean,
+    updated_n = new_n
+  ))
+}
+
+# --- Performance Metrics ---
+compute_metrics_qr <- function(y_true, y_pred, y_scores) {
+  if (length(unique(y_pred)) < 2) {
+    return(data.frame(Accuracy_qr = NA, Precision_qr = NA, Recall_qr = NA,
+                      F1_Score_qr = NA, AUC_qr = NA, TP_qr = NA, TN_qr = NA,
+                      FP_qr = NA, FN_qr = NA))
+  }
+  cm <- caret::confusionMatrix(factor(y_pred), factor(y_true))
+  auc_val <- tryCatch({ pROC::auc(pROC::roc(y_true, y_scores)) }, error = function(e) NA)
+  
+  return(data.frame(
+    Accuracy_qr = cm$overall["Accuracy"],
+    Precision_qr = cm$byClass["Precision"],
+    Recall_qr = cm$byClass["Recall"],
+    F1_Score_qr = cm$byClass["F1"],
+    AUC_qr = auc_val,
+    TP_qr = cm$table[2, 2], TN_qr = cm$table[1, 1],
+    FP_qr = cm$table[1, 2], FN_qr = cm$table[2, 1]
+  ))
+}
+
+# --- Online Weight Update (approximated SVM) ---
+online_weight_update <- function(w_old, X, y, learning_rate = 0.01) {
+  for (i in 1:nrow(X)) {
+    x_i <- X[i, ]
+    y_i <- ifelse(y[i] == levels(y)[2], 1, -1)  # Convert factor to +/-1
+    pred <- sign(sum(w_old * x_i))
+    if (pred != y_i) {
+      w_old <- w_old + learning_rate * y_i * x_i
+    }
+  }
+  return(w_old)
+}
+
+# --- Main Incremental Pipeline ---
+# --- Main Incremental Pipeline with Linear SVM Init ---
+pipeline_incremental_qr <- function(X_train, y_train, num_batches = 10, learning_rate = 0.01, cost_manual = 1) {
+  n <- nrow(X_train)
+  batch_size <- floor(n * 0.7 / num_batches)
+  indices <- split(1:floor(n * 0.7), ceiling(seq_along(1:floor(n * 0.7)) / batch_size))
+  
+  # Ensure exactly 10 batches
+  if (length(indices) > 10) {
+    indices[[10]] <- c(indices[[10]], unlist(indices[11:length(indices)]))
+    indices <- indices[1:10]
+  }
+  
+  results <- data.frame()
+  cov_mat <- NULL; mean_vec <- NULL; n_seen <- 0
+  w <- NULL  # weight vector
+  
+  for (i in seq_along(indices)) {
+    cat("Processing batch", i, "\n")
+    idx <- indices[[i]]
+    X_batch <- X_train[idx, ]
+    y_batch <- y_train[idx]
+    
+    if (i == 1) {
+      # Base model
+      cov_mat <- cov(X_batch)
+      mean_vec <- colMeans(X_batch)
+      n_seen <- nrow(X_batch)
+      
+      qr_result <- qr(cov_mat)
+      projection <- qr.Q(qr_result)[, 1:min(ncol(X_batch), n_seen - 1), drop = FALSE]
+      
+      X_proj <- X_batch %*% projection
+      
+      # --- Train linear SVM and extract weights ---
+      svm_model <- e1071::svm(
+        X_proj,
+        y = as.factor(y_batch),
+        kernel = "linear",
+        cost = cost_manual,
+        class.weights = c('0' = 1, '1' = 1),
+        scale = FALSE,
+        probability = FALSE
+      )
+      
+      # Get weight vector from SVM
+      w <- t(svm_model$coefs) %*% svm_model$SV
+      w <- as.vector(w)
+      
+    } else {
+      # Incremental QR update
+      cpu_start_qr <- proc.time()
+      wall_start_qr <- Sys.time()
+      
+      qr_upd <- incremental_qr_lda(cov_mat, mean_vec, n_seen, X_batch, n_components = ncol(projection))
+      
+      wall_end_qr <- Sys.time()
+      cpu_end_qr <- proc.time()
+      
+      projection <- qr_upd$projection
+      cov_mat <- qr_upd$updated_cov
+      mean_vec <- qr_upd$updated_mean
+      n_seen <- qr_upd$updated_n
+      
+      qr_update_time <- as.numeric(difftime(wall_end_qr, wall_start_qr, units = "secs"))
+      cpu_time_qr <- (cpu_end_qr - cpu_start_qr)[["user.self"]] + (cpu_end_qr - cpu_start_qr)[["sys.self"]]
+      
+      X_proj <- X_batch %*% projection
+      
+      # Incremental weight update
+      cpu_start_w <- proc.time()
+      wall_start_w <- Sys.time()
+      
+      w <- online_weight_update(w, X_proj, y_batch, learning_rate = learning_rate)
+      
+      wall_end_w <- Sys.time()
+      cpu_end_w <- proc.time()
+      
+      svm_time <- as.numeric(difftime(wall_end_w, wall_start_w, units = "secs"))
+      cpu_time_svm <- (cpu_end_w - cpu_start_w)[["user.self"]] + (cpu_end_w - cpu_start_w)[["sys.self"]]
+      
+      # Prediction using current w
+      pred_scores <- X_proj %*% w
+      pred_labels <- ifelse(pred_scores > 0, levels(y_batch)[2], levels(y_batch)[1])
+      
+      metrics <- compute_metrics_qr(y_batch, pred_labels, pred_scores)
+      metrics$QR_Update_Time <- qr_update_time
+      metrics$CPU_Time_QR_Update <- cpu_time_qr
+      metrics$SVM_Training_Time <- svm_time
+      metrics$CPU_Time_SVM_Training <- cpu_time_svm
+      metrics$Total_Training_Time_qr <- qr_update_time + svm_time
+      metrics$Batch <- i
+      
+      results <- rbind(results, metrics)
+    }
+  }
+  return(results)
+}
+
+
+# Example usage:
+set.seed(42)
+
+X_train_qr <- X_train_weighted_top21  # Replace with your preprocessed features
+y_train_qr <- y_train_final           # Replace with your labels
+
+batch_results_qr <- pipeline_incremental_qr(
+  X_train = as.matrix(X_train_qr),
+  y_train = as.factor(y_train_qr),
+  num_batches = 10,
+  learning_rate = 0.01
+)
+
+# Print or save results
+print(batch_results_qr)
+write.csv(batch_results_qr, "incremental_qr_svm_updated_weights_may_21.csv", row.names = FALSE)
+
+
+################## cQR/LDA ###################
+
+# --- QR-based incremental LDA projection ---
+incremental_qr_lda <- function(prev_cov, prev_mean, prev_n, X_new, n_components) {
+  new_n <- prev_n + nrow(X_new)
+  new_mean <- (prev_mean * prev_n + colSums(X_new)) / new_n
+  X_centered <- scale(X_new, center = new_mean, scale = FALSE)
+  
+  cov_update <- (prev_cov * (prev_n - 1) + crossprod(X_centered)) / (new_n - 1)
+  qr_result <- qr(cov_update)
+  Q <- qr.Q(qr_result)[, 1:n_components, drop = FALSE]
+  R <- qr.R(qr_result)[1:n_components, 1:n_components, drop = FALSE]
+  
+  return(list(
+    projection = Q,
+    updated_cov = cov_update,
+    updated_mean = new_mean,
+    updated_n = new_n,
+    Q = Q,
+    R = R
+  ))
+}
+
+# --- Performance Metrics ---
+compute_metrics_qr <- function(y_true, y_pred, y_scores) {
+  if (length(unique(y_pred)) < 2) {
+    return(data.frame(Accuracy_qr = NA, Precision_qr = NA, Recall_qr = NA,
+                      F1_Score_qr = NA, AUC_qr = NA, TP_qr = NA, TN_qr = NA,
+                      FP_qr = NA, FN_qr = NA))
+  }
+  cm <- caret::confusionMatrix(factor(y_pred), factor(y_true))
+  auc_val <- tryCatch({ pROC::auc(pROC::roc(y_true, y_scores)) }, error = function(e) NA)
+  
+  return(data.frame(
+    Accuracy_qr = cm$overall["Accuracy"],
+    Precision_qr = cm$byClass["Precision"],
+    Recall_qr = cm$byClass["Recall"],
+    F1_Score_qr = cm$byClass["F1"],
+    AUC_qr = auc_val,
+    TP_qr = cm$table[2, 2], TN_qr = cm$table[1, 1],
+    FP_qr = cm$table[1, 2], FN_qr = cm$table[2, 1]
+  ))
+}
+
+# --- Incremental SVM weight update using QR ---
+online_weight_update_qr <- function(w_old, X, y, Q, R, learning_rate = 0.01) {
+  R_inv <- solve(R)
+  for (i in 1:nrow(X)) {
+    x_i <- X[i, ]
+    y_i <- ifelse(y[i] == levels(y)[2], 1, -1)
+    pred <- sign(sum(w_old * x_i))
+    error <- y_i - pred
+    
+    if (error != 0) {
+      update_term <- R_inv %*% t(Q) %*% (error * x_i)
+      w_old <- w_old + learning_rate * as.vector(update_term)
+    }
+  }
+  return(w_old)
+}
+
+# --- Main Incremental Pipeline ---
+pipeline_incremental_qr <- function(X_train, y_train, num_batches = 10, learning_rate = 0.01, cost_manual = 1) {
+  n <- nrow(X_train)
+  batch_size <- floor(n * 0.7 / num_batches)
+  indices <- split(1:floor(n * 0.7), ceiling(seq_along(1:floor(n * 0.7)) / batch_size))
+  
+  if (length(indices) > 10) {
+    indices[[10]] <- c(indices[[10]], unlist(indices[11:length(indices)]))
+    indices <- indices[1:10]
+  }
+  
+  results <- data.frame()
+  cov_mat <- NULL; mean_vec <- NULL; n_seen <- 0
+  w <- NULL
+  
+  for (i in seq_along(indices)) {
+    cat("Processing batch", i, "\n")
+    idx <- indices[[i]]
+    X_batch <- X_train[idx, ]
+    y_batch <- y_train[idx]
+    
+    if (i == 1) {
+      cov_mat <- cov(X_batch)
+      mean_vec <- colMeans(X_batch)
+      n_seen <- nrow(X_batch)
+      
+      qr_result <- qr(cov_mat)
+      Q <- qr.Q(qr_result)[, 1:min(ncol(X_batch), n_seen - 1), drop = FALSE]
+      R <- qr.R(qr_result)[1:min(ncol(X_batch), n_seen - 1), 1:min(ncol(X_batch), n_seen - 1), drop = FALSE]
+      projection <- Q
+      
+      X_proj <- X_batch %*% projection
+      
+      svm_model <- e1071::svm(
+        X_proj,
+        y = as.factor(y_batch),
+        kernel = "linear",
+        cost = cost_manual,
+        class.weights = c('0' = 1, '1' = 1),
+        scale = FALSE,
+        probability = FALSE
+      )
+      w <- t(svm_model$coefs) %*% svm_model$SV
+      w <- as.vector(w)
+    } else {
+      cpu_start_qr <- proc.time()
+      wall_start_qr <- Sys.time()
+      
+      qr_upd <- incremental_qr_lda(cov_mat, mean_vec, n_seen, X_batch, n_components = ncol(projection))
+      
+      wall_end_qr <- Sys.time()
+      cpu_end_qr <- proc.time()
+      
+      projection <- qr_upd$projection
+      Q <- qr_upd$Q
+      R <- qr_upd$R
+      cov_mat <- qr_upd$updated_cov
+      mean_vec <- qr_upd$updated_mean
+      n_seen <- qr_upd$updated_n
+      
+      qr_update_time <- as.numeric(difftime(wall_end_qr, wall_start_qr, units = "secs"))
+      cpu_time_qr <- (cpu_end_qr - cpu_start_qr)[["user.self"]] + (cpu_end_qr - cpu_start_qr)[["sys.self"]]
+      
+      X_proj <- X_batch %*% projection
+      
+      cpu_start_w <- proc.time()
+      wall_start_w <- Sys.time()
+      
+      w <- online_weight_update_qr(w, X_proj, y_batch, Q, R, learning_rate = learning_rate)
+      
+      wall_end_w <- Sys.time()
+      cpu_end_w <- proc.time()
+      
+      svm_time <- as.numeric(difftime(wall_end_w, wall_start_w, units = "secs"))
+      cpu_time_svm <- (cpu_end_w - cpu_start_w)[["user.self"]] + (cpu_end_w - cpu_start_w)[["sys.self"]]
+      
+      pred_scores <- X_proj %*% w
+      pred_labels <- ifelse(pred_scores > 0, levels(y_batch)[2], levels(y_batch)[1])
+      
+      metrics <- compute_metrics_qr(y_batch, pred_labels, pred_scores)
+      metrics$QR_Update_Time <- qr_update_time
+      metrics$CPU_Time_QR_Update <- cpu_time_qr
+      metrics$SVM_Training_Time <- svm_time
+      metrics$CPU_Time_SVM_Training <- cpu_time_svm
+      metrics$Total_Training_Time_qr <- qr_update_time + svm_time
+      metrics$Batch <- i
+      
+      results <- rbind(results, metrics)
+    }
+  }
+  return(results)
+}
+
+# --- Example usage ---
+set.seed(42)
+
+# Replace with your own feature and label matrices:
+X_train_qr <- X_train_weighted_top21
+y_train_qr <- y_train_final
+
+batch_results_qr <- pipeline_incremental_qr(
+  X_train = as.matrix(X_train_qr),
+  y_train = as.factor(y_train_qr),
+  num_batches = 10,
+  learning_rate = 0.01
+)
+
+# Print or save results
+print(batch_results_qr)
+write.csv(batch_results_qr, "incremental_qr_svm_updated_weights_final.csv", row.names = FALSE)
+
+
+### MANUAL RESULTS #######
+
+qr_results <- data.frame(
+  Batch = 0:9,
+  Accuracy = c(0.9913294, 0.9913294, 0.9971098, 0.9913294, 0.9971098,
+               0.9971098, 0.9971098, 0.9971098, 0.9971098, 0.9971098),
+  Precision = c(0.9931506, 0.9864864, 1.0000000, 0.9864864, 1.0000000,
+                1.0000000, 1.0000000, 1.0000000, 1.0000000, 1.0000000),
+  Recall = c(0.9863945, 0.9931972, 0.9931972, 0.9931972, 0.9931972,
+             0.9931972, 0.9931972, 0.9931972, 0.9931972, 0.9931972),
+  F1_Score = c(0.9897610, 0.9898305, 0.9965870, 0.9898305, 0.9965870,
+               0.9965870, 0.9965870, 0.9965870, 0.9965870, 0.9965870),
+  AUC = c(0.9991795, 0.9993163, 0.9994530, 0.9994530, 0.9995214,
+          0.9997265, 0.9995897, 0.9994872, 0.9996239, 0.9995897),
+  TP = c(198, 197, 199, 197, 199, 199, 199, 199, 199, 199),
+  TN = c(145, 146, 146, 146, 146, 146, 146, 146, 146, 146),
+  FP = c(1, 2, 0, 2, 0, 0, 0, 0, 0, 0),
+  FN = c(2, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+  QR_Update_Time = c(0.0473129, 0.0645680, 0.03830909, 0.03620004, 0.03809595,
+                     0.03932714, 0.03944301, 0.05426096, 0.03961706, 0.0398139),
+  CPU_Usage_Time = c(0.0470000, 0.0539999, 0.0379999, 0.0360000, 0.0369999,
+                     0.0399999, 0.0379999, 0.0459999, 0.0399999, 0.0399999)
+)
+
+# Example: Take confusion matrix from one batch (e.g., last batch)
+last_batch <- tail(qr_results, 1)
+
+# Create matrix with actual labels (Reference) on rows and predictions on columns
+cm_matrix <- matrix(c(
+  last_batch$TN, last_batch$FP,
+  last_batch$FN, last_batch$TP
+), nrow = 2, byrow = TRUE)
+
+rownames(cm_matrix) <- c("0", "1")  # Actual
+colnames(cm_matrix) <- c("0", "1")  # Predicted
+
+# Melt to long format
+cm_df <- melt(cm_matrix)
+colnames(cm_df) <- c("Reference", "Prediction", "Frequency")
+
+# Plot confusion matrix heatmap
+ggplot(cm_df, aes(x = Prediction, y = Reference, fill = Frequency)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Frequency), size = 6) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Confusion Matrix on Test Data (Incremental QR)",
+       x = "Prediction",
+       y = "Reference") +
+  theme_minimal(base_size = 14)
+
+ggplot(qr_results, aes(x = Batch)) +
+  geom_line(aes(y = Accuracy, color = "Accuracy"), size = 1.2) +
+  geom_line(aes(y = Precision, color = "Precision"), size = 1.2) +
+  geom_line(aes(y = Recall, color = "Recall"), size = 1.2) +
+  geom_line(aes(y = F1_Score, color = "F1 Score"), size = 1.2) +
+  labs(title = "Performance Metrics per Trunk on Test Data (Incremental QR)", y = "Value", color = "Metric") +
+  theme_minimal() +
+  scale_color_manual(values = c("Accuracy" = "darkgreen", "Precision" = "steelblue",
+                                "Recall" = "orange", "F1 Score" = "purple"))
+
+
+ggplot(qr_results, aes(x = Batch)) +
+  geom_line(aes(y = QR_Update_Time, color = "QR Update Time"), size = 1) +
+  geom_line(aes(y = CPU_Usage_Time, color = "CPU Usage Time"), size = 1) +
+  labs(
+    title = "QR Update Time & CPU Usage Time per Trunk",
+    x = "Trunk Index",
+    y = "Time (seconds)",
+    color = "Metric"
+  ) +
+  theme_minimal(base_size = 14)
+
+##### LDA TEST #######################
+
+lda_results <- data.frame(
+  Batch = 1:10,
+  Accuracy = c(1.0000000, 1.0000000, 1.0000000, 1.0000000, 1.0000000,
+               0.9991349, 0.9991349, 1.0000000, 0.9982698, 1.0000000),
+  Precision = rep(1.0000000, 10),
+  Recall = c(1.0000000, 1.0000000, 1.0000000, 1.0000000, 1.0000000,
+             0.9984984, 0.9984375, 1.0000000, 0.9969512, 1.0000000),
+  F1_Score = rep(1.0000000, 10),
+  AUC = c(1.0000000, 1.0000000, 1.0000000, 1.0000000, 1.0000000,
+          0.9992486, 0.9992181, 1.0000000, 0.9984732, 1.0000000),
+  TP = c(660, 669, 657, 667, 688, 665, 639, 648, 654, 682),
+  TN = c(497, 487, 499, 489, 468, 490, 516, 508, 500, 475),
+  FP = c(0, 0, 0, 0, 0, 1, 1, 0, 2, 0),
+  FN = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  LDA_Update_Time = c(0.0658850, 0.0655949, 0.0657379, 0.0678060, 0.0671451,
+                      0.0680990, 0.0705981, 0.0688130, 0.0669128, 0.0685379),
+  CPU_Usage_Time = c(0.0659999, 0.0650000, 0.0640000, 0.0660000, 0.0669999,
+                     0.0690000, 0.0670000, 0.0680000, 0.0670000, 0.0680000)
+)
+
+ggplot(lda_results, aes(x = Batch)) +
+  geom_line(aes(y = LDA_Update_Time, color = "LDA Update Time"), size = 1) +
+  geom_line(aes(y = CPU_Usage_Time, color = "CPU Usage Time"), size = 1) +
+  labs(
+    title = "LDA Update Time & CPU Usage Time per Trunk",
+    x = "Trunk Index",
+    y = "Time (seconds)",
+    color = "Metric"
+  ) +
+  theme_minimal(base_size = 14)
+
+
+ggplot(lda_results, aes(x = Batch)) +
+  geom_line(aes(y = Accuracy, color = "Accuracy"), size = 1.2) +
+  geom_line(aes(y = Precision, color = "Precision"), size = 1.2) +
+  geom_line(aes(y = Recall, color = "Recall"), size = 1.2) +
+  geom_line(aes(y = F1_Score, color = "F1 Score"), size = 1.2) +
+  labs(title = "Performance Metrics per Trunk on Test Data (Top 21 Features)", y = "Value", color = "Metric") +
+  theme_minimal() +
+  scale_color_manual(values = c("Accuracy" = "darkgreen", "Precision" = "steelblue",
+                                "Recall" = "orange", "F1 Score" = "purple"))
+
+# Example: Take confusion matrix from one batch (e.g., last batch)
+last_batch <- tail(lda_results, 1)
+
+# Create matrix with actual labels (Reference) on rows and predictions on columns
+cm_matrix <- matrix(c(
+  last_batch$TN, last_batch$FP,
+  last_batch$FN, last_batch$TP
+), nrow = 2, byrow = TRUE)
+
+rownames(cm_matrix) <- c("0", "1")  # Actual
+colnames(cm_matrix) <- c("0", "1")  # Predicted
+
+# Melt to long format
+cm_df <- melt(cm_matrix)
+colnames(cm_df) <- c("Reference", "Prediction", "Frequency")
+
+# Plot confusion matrix heatmap
+ggplot(cm_df, aes(x = Prediction, y = Reference, fill = Frequency)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Frequency), size = 6) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Confusion Matrix on Test Data (Top 21 Features)",
+       x = "Prediction",
+       y = "Reference") +
+  theme_minimal(base_size = 14)

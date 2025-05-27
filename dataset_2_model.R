@@ -35,6 +35,10 @@ library(tidyr)
 # ===== LOAD DATA =====
 df <- read.csv("Dataset_5971.csv", stringsAsFactors = FALSE)
 
+n_features <- ncol(df)
+cat("Number of features:", n_features, "\n")
+print(colnames(df))
+
 # Convert LABEL to binary target
 df$target_binary <- ifelse(tolower(df$LABEL) == "ham", 0, 1)
 
@@ -78,6 +82,15 @@ X_dtm$PHONE <- df$PHONE
 
 # Scale features
 X_scaled <- as.data.frame(scale(X_dtm))
+
+n_features <- ncol(X_scaled)
+cat("Number of features:", n_features, "\n")
+print(colnames(X_scaled))
+
+# Number of terms after sparsity filter
+length(dtm$dimnames$Terms)
+# Number of added features
+length(c("URL", "PHONE"))
 
 # Target vector
 y_clean <- df$target_binary
@@ -519,7 +532,7 @@ stopCluster(cl)
 # ===================================================
 
 # Get top 10 features based on absolute LDA coefficients
-top_features <- order(abs(W_vec), decreasing = TRUE)[1:30]
+top_features <- order(abs(W_vec), decreasing = TRUE)[1:10]
 
 # Convert to matrix for CV loop
 X_weighted_data <- as.matrix(X_train_weighted)
@@ -728,7 +741,7 @@ svm_model_top10_final <- svm(X_train_final_selected, as.factor(y_train_final), k
 ###### BATCH #######
 
 #Get top 10 features based on absolute LDA coefficients
-top_features <- order(abs(W_vec), decreasing = TRUE)[1:30]
+top_features <- order(abs(W_vec), decreasing = TRUE)[1:10]
 
 #Convert to matrix for batch CV loop
 X_weighted_data <- as.matrix(X_train_weighted)
@@ -843,7 +856,7 @@ write.csv(results_batch, "results_batch_new.csv", row.names = FALSE)
 lda_weights <- abs(lda_model$scaling[, 1])
 
 # Get indices of the top 10 features
-top_10_indices <- order(lda_weights, decreasing = TRUE)[1:30]
+top_10_indices <- order(lda_weights, decreasing = TRUE)[1:10]
 
 # If you're using the real LDA-weighted data
 X_train_weighted_top10 <- X_train_weighted[, top_10_indices]
@@ -1255,17 +1268,17 @@ incremental_results_test_qr_v2 <- incremental_qr_on_test_eval_new_batch_v2(
 print(incremental_results_test_qr_v2$results)
 
 # Save results to CSV
-write.csv(incremental_results_test_qr_v2$results, "results_incremental_qr_test.csv", row.names = FALSE)
+write.csv(incremental_results_test_qr_v2$results, "results_incremental_qr_test_May_24.csv", row.names = FALSE)
 
-cat("Length of all_preds:", length(incremental_results_test_qr_new_eval$all_preds), "\n")
-cat("Length of all_actual:", length(incremental_results_test_qr_new_eval$all_actual), "\n")
+cat("Length of all_preds:", length(incremental_results_test_qr_v2$all_preds), "\n")
+cat("Length of all_actual:", length(incremental_results_test_qr_v2$all_actual), "\n")
 
 
 # ----- Plotting -----
 if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
   # ----- Confusion Matrix Visualization (Final Batch) -----
-  final_preds_eval_new <- incremental_results_test_qr_new_eval$all_preds
-  final_actual_eval_new <- as.factor(incremental_results_test_qr_new_eval$all_actual)
+  final_preds_eval_new <- incremental_results_test_qr_v2$all_preds
+  final_actual_eval_new <- as.factor(incremental_results_test_qr_v2$all_actual)
   
   if (length(levels(final_preds_eval_new)) > 1 && length(levels(final_actual_eval_new)) > 1) {
     cm_final_eval_new <- caret::confusionMatrix(final_preds_eval_new, final_actual_eval_new)
@@ -1283,8 +1296,8 @@ if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
   
   
   # ----- ROC Curve (Aggregated over Batches) -----
-  all_probs_eval_new <- incremental_results_test_qr_new_eval$all_proba
-  all_labels_eval_new <- incremental_results_test_qr_new_eval$all_actual
+  all_probs_eval_new <- incremental_results_test_qr_v2$all_proba
+  all_labels_eval_new <- incremental_results_test_qr_v2$all_actual
   
   if (length(unique(all_labels_eval_new)) > 1 && length(unique(all_probs_eval_new)) > 1) {
     roc_obj_eval_new <- roc(all_labels_eval_new, all_probs_eval_new)
@@ -1320,7 +1333,7 @@ if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
   }
   
   # ----- Performance Metrics vs. Batch -----
-  results_long_eval_new <- gather(incremental_results_test_qr_new_eval$results, key = "Metric", value = "Value",
+  results_long_eval_new <- gather(incremental_results_test_qr_v2$results, key = "Metric", value = "Value",
                                   Accuracy, AUC, Precision, Recall, F1_Score)
   
   plt_metrics_eval_new <- ggplot(results_long_eval_new, aes(x = Batch, y = Value, color = Metric)) +
@@ -1336,6 +1349,7 @@ if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC)) {
 } else {
   cat("Please install 'ggplot2', 'caret', 'pROC', and 'PRROC' packages to plot.\n")
 }
+
 
 
 
@@ -1444,7 +1458,7 @@ print(test_results_top10)
 summary(test_results_top10)
 
 # Optional: Save to CSV
-write.csv(test_results_top10, file = "results_test_top10_new.csv", row.names = FALSE)
+write.csv(test_results_top10, file = "results_test_top10_new_may_24.csv", row.names = FALSE)
 
 
 # === Plotting ===
@@ -1615,3 +1629,42 @@ if (require(ggplot2) && require(caret) && require(pROC) && require(PRROC) && req
 # )
 # 
 # print(incremental_results_buffered_qr)
+
+# Your data
+qr_sms_results <- data.frame(
+  Trunk = 0:9,
+  Accuracy = c(0.9687536, 0.9899497, 0.9748743, 0.9899497, 0.9849246,
+               0.9748743, 0.9949748, 0.9899497, 0.9798994, 0.9899497),
+  Precision = c(0.9545454, 0.9859154, 0.9701492, 0.9864864, 0.9790209,
+                0.9652777, 0.9933333, 0.9867549, 0.9760479, 0.9862068),
+  Recall = c(1.0000000, 1.0000000, 0.9923664, 1.0000000, 1.0000000,
+             1.0000000, 1.0000000, 1.0000000, 1.0000000, 1.0000000),
+  F1_Score = c(0.9767441, 0.9929078, 0.9811320, 0.9931972, 0.9893992,
+               0.9823321, 0.9966555, 0.9933333, 0.9878787, 0.9930555),
+  AUC = c(0.9978354, 1.0000000, 0.9951728, 0.9840398, 0.9955811,
+          0.9761390, 0.9871140, 0.9881879, 0.9982958, 0.9929445),
+  TP = c(10, 57, 64, 51, 56, 55, 49, 48, 32, 54),
+  TN = c(21, 140, 149, 146, 140, 139, 149, 149, 163, 143),
+  FP = c(1, 2, 4, 2, 3, 5, 1, 2, 4, 2),
+  FN = c(0, 0, 1, 0, 0, 0, 0, 0, 0, 0),
+  QR_Update_Time = c(0.0020000, 0.0095379, 0.0003280, 0.0003170, 0.0002930,
+                     0.0003058, 0.0002760, 0.0002889, 0.0002760, 0.0002689),
+  CPU_Usage_Time = c(0.0018785, 0.0024119, 0.0041023, 0.0049817, 0.0065826,
+                     0.0155001, 0.0103766, 0.0115422, 0.0124000, 0.0146653)
+)
+
+# Calculate TPR (Recall) and FPR for each trunk
+qr_sms_results$TPR <- qr_sms_results$Recall  # TPR is the same as Recall
+qr_sms_results$FPR <- qr_sms_results$FP / (qr_sms_results$FP + qr_sms_results$TN)
+
+# Plot the ROC points (not a full curve, just the points for each trunk)
+plot(0, 0, xlim = c(0, 1), ylim = c(0, 1), type = "n", 
+     xlab = "False Positive Rate", ylab = "True Positive Rate", 
+     main = "Approximate ROC Points for QR-SMS Across Trunks")
+lines(c(0, 1), c(0, 1), lty = 2, col = "gray")  # Diagonal line
+points(qr_sms_results$FPR, qr_sms_results$TPR, pch = 19, col = "blue")
+text(qr_sms_results$FPR, qr_sms_results$TPR, labels = qr_sms_results$Trunk, pos = 3)
+
+# Add AUC values in the legend
+legend("bottomright", legend = paste("Trunk", qr_sms_results$Trunk, "AUC =", round(qr_sms_results$AUC, 3)), 
+       col = "blue", pch = 19, cex = 0.8)
